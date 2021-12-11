@@ -77,12 +77,16 @@ public class HourlyTipsTest extends TaxiRideTestBase<Tuple3<Long, Long, Float>> 
 		TaxiFare fiveFor1In1 = testFare(1, t(15), 5.0F);
 		TaxiFare tenFor1In2 = testFare(1, t(90), 10.0F);
 		TaxiFare twentyFor2In2 = testFare(2, t(90), 20.0F);
+		TaxiFare eighteenFor2In2 = testFare(3, t(90), 18.0F);
+		TaxiFare sixteenFor2In2 = testFare(4, t(90), 16.0F);
 
 		TestFareSource source = new TestFareSource(
 				oneFor1In1,
 				fiveFor1In1,
+				twentyFor2In2,
+				eighteenFor2In2,
 				tenFor1In2,
-				twentyFor2In2
+				sixteenFor2In2
 		);
 
 		Tuple3<Long, Long, Float> hour1 = Tuple3.of(t(60).toEpochMilli(), 1L, 6.0F);
@@ -94,7 +98,7 @@ public class HourlyTipsTest extends TaxiRideTestBase<Tuple3<Long, Long, Float>> 
 	}
 
 	private Instant t(int minutes) {
-		return Instant.parse("2020-01-01T12:00:00.00Z").plusSeconds(60 * minutes);
+		return Instant.parse("2020-01-01T12:00:00.00Z").plusSeconds(60L * minutes);
 	}
 
 	private TaxiFare testFare(long driverId, Instant startTime, float tip) {
