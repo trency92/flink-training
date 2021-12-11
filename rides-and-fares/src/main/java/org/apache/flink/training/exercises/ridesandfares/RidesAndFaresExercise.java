@@ -18,6 +18,8 @@
 
 package org.apache.flink.training.exercises.ridesandfares;
 
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -28,7 +30,6 @@ import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
 import org.apache.flink.training.exercises.common.sources.TaxiFareGenerator;
 import org.apache.flink.training.exercises.common.sources.TaxiRideGenerator;
 import org.apache.flink.training.exercises.common.utils.ExerciseBase;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
 import org.apache.flink.util.Collector;
 
 /**
@@ -70,17 +71,39 @@ public class RidesAndFaresExercise extends ExerciseBase {
 
 	public static class EnrichmentFunction extends RichCoFlatMapFunction<TaxiRide, TaxiFare, Tuple2<TaxiRide, TaxiFare>> {
 
+		private transient ValueState<TaxiRide> rideState;
+		private transient ValueState<TaxiFare> fareState;
+
 		@Override
-		public void open(Configuration config) throws Exception {
-			throw new MissingSolutionException();
+		public void open(Configuration config) {
+			this.rideState = this.getRuntimeContext().getState(new ValueStateDescriptor<>("ride", TaxiRide.class));
+			this.fareState = this.getRuntimeContext().getState(new ValueStateDescriptor<>("fare", TaxiFare.class));
+//			throw new MissingSolutionException();
 		}
 
 		@Override
 		public void flatMap1(TaxiRide ride, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+			TaxiFare fare = this.fareState.value();
+			// fare先到
+			if (fare != null) {
+				this.fareState.clear();
+				out.collect(Tuple2.of(ride, fare));
+			} else {
+				this.rideState.update(ride);
+			}
 		}
 
 		@Override
 		public void flatMap2(TaxiFare fare, Collector<Tuple2<TaxiRide, TaxiFare>> out) throws Exception {
+			TaxiRide ride = this.rideState.value();
+			// ride先到
+			if (ride != null) {
+				this.rideState.clear();
+				out.collect(Tuple2.of(ride, fare));
+			} else {
+				this.fareState.update(fare);
+			}
+
 		}
 	}
 }
