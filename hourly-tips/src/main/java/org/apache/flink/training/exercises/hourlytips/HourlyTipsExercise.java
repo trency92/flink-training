@@ -24,6 +24,7 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
@@ -34,6 +35,9 @@ import org.apache.flink.training.exercises.common.datatypes.TaxiFare;
 import org.apache.flink.training.exercises.common.sources.TaxiFareGenerator;
 import org.apache.flink.training.exercises.common.utils.ExerciseBase;
 import org.apache.flink.util.Collector;
+import org.apache.flink.util.OutputTag;
+
+import static org.apache.flink.training.exercises.hourlytips.HourlyTipsExercise.PseudoWindow.lateFares;
 
 /**
  * The "Hourly Tips" exercise of the Flink training in the docs.
@@ -63,9 +67,11 @@ public class HourlyTipsExercise extends ExerciseBase {
 //				.window(TumblingEventTimeWindows.of(Time.hours(1)))
 //				.process(new AddTips());
 
-		DataStream<Tuple3<Long, Long, Float>> hourlyTips = fares
+		SingleOutputStreamOperator<Tuple3<Long, Long, Float>> hourlyTips = fares
 				.keyBy(v -> v.driverId)
 				.process(new PseudoWindow(Time.hours(1)));
+
+		hourlyTips.getSideOutput(lateFares).print();
 
 //		DataStream<Tuple3<Long, Long, Float>> hourlyMax = hourlyTips
 //				// windowAll 并行度始终为1
@@ -96,11 +102,14 @@ public class HourlyTipsExercise extends ExerciseBase {
 		}
 	}
 
-	private static class PseudoWindow extends KeyedProcessFunction<Long, TaxiFare, Tuple3<Long, Long, Float>> {
+	public static class PseudoWindow extends KeyedProcessFunction<Long, TaxiFare, Tuple3<Long, Long, Float>> {
 
 		private final long durationMsec;
 
 		private transient MapState<Long, Float> sumOfTips;
+
+		// 末尾 {} 不能少
+		protected static final OutputTag<TaxiFare> lateFares = new OutputTag<TaxiFare>("lateFares") {};
 
 		public PseudoWindow(Time duration) {
 			this.durationMsec = duration.toMilliseconds();
@@ -117,7 +126,7 @@ public class HourlyTipsExercise extends ExerciseBase {
 			TimerService timerService = ctx.timerService();
 			if (eventTime <= timerService.currentWatermark()) {
 				// 事件延迟 对应的窗口已经触发
-				System.out.println("delay fare: " + fare.rideId);
+				ctx.output(lateFares, fare);
 			} else {
 //				long endOfWindow = eventTime - (eventTime % durationMsec) + durationMsec - 1;
 				long endOfWindow = eventTime - (eventTime % durationMsec) + durationMsec;
