@@ -67,13 +67,14 @@ public class HourlyTipsExercise extends ExerciseBase {
 					}
 				});
 
-		DataStream<Tuple3<Long, Long, Float>> hourlyMax = hourlyTips
-				// windowAll 并行度始终为1
-				.windowAll(TumblingEventTimeWindows.of(Time.hours(1)))
-				.maxBy(2);
+//		DataStream<Tuple3<Long, Long, Float>> hourlyMax = hourlyTips
+//				// windowAll 并行度始终为1
+//				.windowAll(TumblingEventTimeWindows.of(Time.hours(1)))
+//				.maxBy(2);
 		// 可能重复计算 流式计算 通过keyBy只会把数据分开 没有聚合效果 取max时 只针对当前及当前之前的数据进行计算
 		// https://www.jianshu.com/p/ff2509c93eb1
-//		DataStream<Tuple3<Long, Long, Float>> hourlyMax = hourlyTips.keyBy(v -> v.f0).maxBy(2);
+		// 通过窗口计算可以解决问题
+		DataStream<Tuple3<Long, Long, Float>> hourlyMax = hourlyTips.keyBy(v -> v.f0).window(TumblingEventTimeWindows.of(Time.hours(1))).maxBy(2);
 
 //		throw new MissingSolutionException();
 
