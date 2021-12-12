@@ -18,9 +18,14 @@
 
 package org.apache.flink.training.exercises.hourlytips;
 
+import org.apache.flink.api.common.state.MapState;
+import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.java.tuple.Tuple3;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.time.Time;
@@ -53,19 +58,14 @@ public class HourlyTipsExercise extends ExerciseBase {
 		// start the data generator
 		DataStream<TaxiFare> fares = env.addSource(fareSourceOrTest(new TaxiFareGenerator()));
 
+//		DataStream<Tuple3<Long, Long, Float>> hourlyTips = fares
+//				.keyBy(v -> v.driverId)
+//				.window(TumblingEventTimeWindows.of(Time.hours(1)))
+//				.process(new AddTips());
+
 		DataStream<Tuple3<Long, Long, Float>> hourlyTips = fares
 				.keyBy(v -> v.driverId)
-				.window(TumblingEventTimeWindows.of(Time.hours(1)))
-				.process(new ProcessWindowFunction<TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow>() {
-					@Override
-					public void process(Long key, Context context, Iterable<TaxiFare> fares, Collector<Tuple3<Long, Long, Float>> out) {
-						float sumOfTips = 0.0F;
-						for (TaxiFare fare : fares) {
-							sumOfTips += fare.tip;
-						}
-						out.collect(Tuple3.of(context.window().getEnd(), key, sumOfTips));
-					}
-				});
+				.process(new PseudoWindow(Time.hours(1)));
 
 //		DataStream<Tuple3<Long, Long, Float>> hourlyMax = hourlyTips
 //				// windowAll 并行度始终为1
@@ -84,4 +84,64 @@ public class HourlyTipsExercise extends ExerciseBase {
 		env.execute("Hourly Tips (java)");
 	}
 
+	public static class AddTips extends ProcessWindowFunction<TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow> {
+
+		@Override
+		public void process(Long key, Context context, Iterable<TaxiFare> fares, Collector<Tuple3<Long, Long, Float>> out) {
+			float sumOfTips = 0.0F;
+			for (TaxiFare fare : fares) {
+				sumOfTips += fare.tip;
+			}
+			out.collect(Tuple3.of(context.window().getEnd(), key, sumOfTips));
+		}
+	}
+
+	private static class PseudoWindow extends KeyedProcessFunction<Long, TaxiFare, Tuple3<Long, Long, Float>> {
+
+		private final long durationMsec;
+
+		private transient MapState<Long, Float> sumOfTips;
+
+		public PseudoWindow(Time duration) {
+			this.durationMsec = duration.toMilliseconds();
+		}
+
+		@Override
+		public void open(Configuration parameters) {
+			sumOfTips = getRuntimeContext().getMapState(new MapStateDescriptor<>("sumOfTips", Long.class, Float.class));
+		}
+
+		@Override
+		public void processElement(TaxiFare fare, Context ctx, Collector<Tuple3<Long, Long, Float>> out) throws Exception {
+			long eventTime = fare.getEventTime();
+			TimerService timerService = ctx.timerService();
+			if (eventTime <= timerService.currentWatermark()) {
+				// 事件延迟 对应的窗口已经触发
+				System.out.println("delay fare: " + fare.rideId);
+			} else {
+//				long endOfWindow = eventTime - (eventTime % durationMsec) + durationMsec - 1;
+				long endOfWindow = eventTime - (eventTime % durationMsec) + durationMsec;
+
+				timerService.registerEventTimeTimer(endOfWindow);
+
+				Float sum = sumOfTips.get(endOfWindow);
+				if (sum == null) {
+					sum = 0.0F;
+				}
+				sum += fare.tip;
+				sumOfTips.put(endOfWindow, sum);
+			}
+		}
+
+		@Override
+		public void onTimer(long timestamp, OnTimerContext ctx, Collector<Tuple3<Long, Long, Float>> out) throws Exception {
+			Long driverId = ctx.getCurrentKey();
+			// 查找刚结束的一小时结果
+			Float sumOfTips = this.sumOfTips.get(timestamp);
+
+			Tuple3<Long, Long, Float> result = Tuple3.of(timestamp, driverId, sumOfTips);
+			out.collect(result);
+			this.sumOfTips.remove(timestamp);
+		}
+	}
 }
